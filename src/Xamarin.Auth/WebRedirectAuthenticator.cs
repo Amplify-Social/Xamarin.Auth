@@ -33,6 +33,10 @@ namespace Xamarin.Auth
 		Uri initialUrl;
 		Uri redirectUrl;
 
+		protected override Uri CustomUrl {
+			get { return redirectUrl; }
+		}
+
 		/// <summary>
 		/// Initializes a new instance of the <see cref="Xamarin.Auth.WebRedirectAuthenticator"/> class.
 		/// </summary>
@@ -81,12 +85,14 @@ namespace Xamarin.Auth
 		/// <param name='url'>
 		/// The URL of the page.
 		/// </param>
-		public override void OnPageLoading (Uri url)
+		public override bool OnPageLoading (Uri url)
 		{
 			var query = WebEx.FormDecode (url.Query);
 			var fragment = WebEx.FormDecode (url.Fragment);
 
 			OnPageEncountered (url, query, fragment);
+
+			return true;
 		}
 
 		/// <summary>

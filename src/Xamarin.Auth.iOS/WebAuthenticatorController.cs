@@ -33,6 +33,7 @@ namespace Xamarin.Auth
 		UIActivityIndicatorView activity;
 		UIView authenticatingView;
 		ProgressLabel progress;
+		UIBarButtonItem cancelBarButtonItem;
 		bool webViewVisible = true;
 
 		const double TransitionTime = 0.25;
@@ -53,26 +54,27 @@ namespace Xamarin.Auth
 
 			if (authenticator.AllowCancel)
 			{
-				NavigationItem.LeftBarButtonItem = new UIBarButtonItem (
+				cancelBarButtonItem = NavigationItem.LeftBarButtonItem = new UIBarButtonItem (
 					UIBarButtonSystemItem.Cancel,
 					delegate {
 					Cancel ();
 				});				
 			}
 
-			var activityStyle = UIActivityIndicatorViewStyle.White;
-			if (UIDevice.CurrentDevice.CheckSystemVersion (7, 0))
-				activityStyle = UIActivityIndicatorViewStyle.Gray;
-
-			activity = new UIActivityIndicatorView (activityStyle);
-			NavigationItem.RightBarButtonItem = new UIBarButtonItem (activity);
-
 			webView = new UIWebView (View.Bounds) {
 				Delegate = new WebViewDelegate (this),
 				AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight,
+				Hidden = true
 			};
 			View.AddSubview (webView);
-			View.BackgroundColor = UIColor.Black;
+
+			activity = new UIActivityIndicatorView (UIActivityIndicatorViewStyle.Gray) {
+				AutoresizingMask = UIViewAutoresizing.FlexibleMargins,
+				Center = View.Center
+			};
+
+			View.AddSubview (activity);
+			View.BackgroundColor = UIColor.White;
 
 			//
 			// Locate our initial URL
@@ -87,10 +89,13 @@ namespace Xamarin.Auth
 
 		void BeginLoadingInitialUrl ()
 		{
+			activity.StartAnimating ();
+
 			authenticator.GetInitialUrlAsync ().ContinueWith (t => {
 				if (t.IsFaulted) {
 					keepTryingAfterError = false;
 					authenticator.OnError (t.Exception);
+					activity.StopAnimating ();
 				}
 				else {
 					// Delete cookies so we can work with multiple accounts
@@ -164,18 +169,21 @@ namespace Xamarin.Auth
 				(Action)BeginLoadingInitialUrl :
 				(Action)Cancel;
 
-			if (e.Exception != null) {
-				this.ShowError ("Authentication Error", e.Exception, after);
-			}
-			else {
-				this.ShowError ("Authentication Error", e.Message, after);
-			}
+			this.ShowError ("Connection Failed", "Check your Internet connection and try again.", after);
+		}
+
+		void MoveActivityToNavigationBar ()
+		{
+			activity.RemoveFromSuperview ();
+			activity.ActivityIndicatorViewStyle = UIActivityIndicatorViewStyle.White;
+			NavigationItem.RightBarButtonItem = new UIBarButtonItem (activity);
 		}
 
 		protected class WebViewDelegate : UIWebViewDelegate
 		{
 			protected WebAuthenticatorController controller;
 			Uri lastUrl;
+			bool ignoreLoadInterruptedError;
 
 			public WebViewDelegate (WebAuthenticatorController controller)
 			{
@@ -189,7 +197,9 @@ namespace Xamarin.Auth
 				if (nsUrl != null && !controller.authenticator.HasCompleted) {
 					Uri url;
 					if (Uri.TryCreate (nsUrl.AbsoluteString, UriKind.Absolute, out url)) {
-						controller.authenticator.OnPageLoading (url);
+						var shouldStartLoad = controller.authenticator.OnPageLoading (url);
+						ignoreLoadInterruptedError = !shouldStartLoad;
+						return shouldStartLoad;
 					}
 				}
 
@@ -209,17 +219,22 @@ namespace Xamarin.Auth
 					return;
 
 				controller.activity.StopAnimating ();
+				controller.MoveActivityToNavigationBar ();
 
 				webView.UserInteractionEnabled = true;
+				webView.Hidden = false;
 
-				controller.authenticator.OnError (error.LocalizedDescription);
+				if (!ignoreLoadInterruptedError || error.Code != 102)
+					controller.authenticator.OnError (error.LocalizedDescription);
 			}
 
 			public override void LoadingFinished (UIWebView webView)
 			{
 				controller.activity.StopAnimating ();
+				controller.MoveActivityToNavigationBar ();
 
 				webView.UserInteractionEnabled = true;
+				webView.Hidden = false;
 
 				var url = new Uri (webView.Request.Url.AbsoluteString);
 				if (url != lastUrl && !controller.authenticator.HasCompleted) {

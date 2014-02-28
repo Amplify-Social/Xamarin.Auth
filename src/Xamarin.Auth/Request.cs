@@ -51,10 +51,16 @@ namespace Xamarin.Auth
 
 		/// <summary>
 		/// The parameters of the request. These will be added to the query string of the
-		/// URL for GET requests, encoded as form a parameters for POSTs, and added as
-		/// multipart values if the request uses <see cref="Multiparts"/>.
+		/// URL for GET requests, encoded as form parameters and concatenated with <see cref="Body"/> for POSTs,
+		/// and added as multipart values if the request uses <see cref="Multiparts"/>.
 		/// </summary>
 		public IDictionary<string, string> Parameters { get; protected set; }
+
+		/// <summary>
+		/// The body of the request. Unless <see cref="HasBody"/> is overriden,
+		/// its value will be appended to the form-encoded <see cref="Parameters"/> for POSTs.
+		/// </summary>
+		public virtual string Body { get; set; }
 
 		/// <summary>
 		/// The account that will be used to authenticate this request.
@@ -192,6 +198,7 @@ namespace Xamarin.Auth
 		public virtual Task<Response> GetResponseAsync (CancellationToken cancellationToken)
 		{
 			var request = GetPreparedWebRequest ();
+			var tcs = new TaskCompletionSource<Response> ();
 
 			//
 			// Disable 100-Continue: http://blogs.msdn.com/b/shitals/archive/2008/12/27/9254245.aspx
@@ -199,6 +206,8 @@ namespace Xamarin.Auth
 			if (Method == "POST") {
 				ServicePointManager.Expect100Continue = false;
 			}
+
+			cancellationToken.Register (() => tcs.TrySetCanceled ());
 
 			if (Multiparts.Count > 0) {
 				var boundary = "---------------------------" + new Random ().Next ();
@@ -350,6 +359,24 @@ namespace Xamarin.Auth
 			}
 
 			return request;
+		}
+
+		/// <summary>
+		/// Gets a value indicating whether this <see cref="Xamarin.Auth.Request"/> needs to have a body on POST.
+		/// </summary>
+		protected virtual bool HasBody {
+			get {
+				return Parameters.Count > 0 || !string.IsNullOrWhiteSpace (Body);
+			}
+		}
+
+		/// <summary>
+		/// Returns the request body that will be used for POST if <see cref="HasBody"/> is <c>true</c>.
+		/// By default, it includes form-encoded <see cref="Parameters"/> concatenated with <see cref="Body"/>.
+		/// </summary>
+		public virtual string GetRawBody ()
+		{
+			return Parameters.FormEncode () + Body;
 		}
 	}
 }

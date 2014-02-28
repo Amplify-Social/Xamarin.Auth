@@ -19,6 +19,8 @@ using System.Threading.Tasks;
 using System.Threading;
 
 #if PLATFORM_IOS
+using MonoTouch.Foundation;
+using MonoTouch.UIKit;
 using AuthenticateUIType = MonoTouch.UIKit.UIViewController;
 #elif PLATFORM_ANDROID
 using AuthenticateUIType = Android.Content.Intent;
@@ -49,6 +51,13 @@ namespace Xamarin.Auth
 		}
 
 		/// <summary>
+		/// Gets the application custom URL registered for this authenticator.
+		/// </summary>
+		protected abstract Uri CustomUrl {
+			get;
+		}
+
+		/// <summary>
 		/// Method that returns the initial URL to be displayed in the web browser.
 		/// </summary>
 		/// <returns>
@@ -62,8 +71,9 @@ namespace Xamarin.Auth
 		/// <param name='url'>
 		/// The URL of the page.
 		/// </param>
-		public virtual void OnPageLoading (Uri url)
+		public virtual bool OnPageLoading (Uri url)
 		{
+			return true;
 		}
 
 		/// <summary>
@@ -122,7 +132,7 @@ namespace Xamarin.Auth
 		/// </returns>
 		protected override AuthenticateUIType GetPlatformUI ()
 		{
-			return new MonoTouch.UIKit.UINavigationController (new WebAuthenticatorController (this));
+			return new WebAuthenticatorNavigationController (new WebAuthenticatorController (this));
 		}
 #elif PLATFORM_ANDROID
 		/// <summary>
@@ -153,6 +163,35 @@ namespace Xamarin.Auth
 			throw new NotSupportedException ("WebAuthenticator not supported on this platform.");
 		}
 #endif
+
+		/// <summary>
+		/// Opens authentication page in system browser and waits for the app to go foreground with a custom URL.
+		/// </summary>
+		/// <param name="handler">Custom URL handler. Use <see cref="SafariUrlHandler.Instance"/> for iOS.</param>
+		public void AuthenticateWithBrowser (ICustomUrlHandler handler)
+		{
+			if (CustomUrl.AbsoluteUri.StartsWith ("http"))
+				throw new InvalidOperationException (string.Format (
+					"You need to replace '{0}' with application-specific custom URL to use browser authentication.", CustomUrl));
+
+			GetInitialUrlAsync ().ContinueWith (initUrlTask => {
+				if (initUrlTask.IsFaulted)
+					OnError (initUrlTask.Exception);
+				else if (initUrlTask.IsCanceled)
+					OnCancelled ();
+
+				var externalUrl = initUrlTask.Result;
+
+				handler.OpenUrl (externalUrl, CustomUrl.Scheme).ContinueWith (callbackTask => {
+					if (callbackTask.IsFaulted)
+						OnError (callbackTask.Exception);
+					else if (callbackTask.IsCanceled)
+						OnCancelled ();
+					else
+						OnPageLoaded (callbackTask.Result);
+				}, TaskScheduler.FromCurrentSynchronizationContext ());
+			}, TaskScheduler.FromCurrentSynchronizationContext ());
+		}
 	}
 }
 
